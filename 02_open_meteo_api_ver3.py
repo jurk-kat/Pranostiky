@@ -1,0 +1,171 @@
+# NOTES to the VER3 (13.12.2024):
+# This version comes from the 02_open_meteo_api.py. The adjustment I do here is to pick & save only the information for the dates required. I already know ver2 will not work for longer lists of coordinates due to the restriction of number of apis one can run in a minute, hour and day. To cut down the amount of saved data, I decided to try to save only the required dates (25.11. and 24.12.) from the set of dates of all 50 or how many years. That allows me to run the code only once for each coordinate & save my api call count as well as to get the max amount of relevant data from it without saving that 363/365 unnecessary lines.
+
+
+# ------------------------------------------------------
+
+# This code, originally copied from open meteo, was adjusted for our needs. The original code included two lists of coordinate data - one with latitudes, one with longtitudes. The aim of is to rewrite the code so that instead of using a list, it utilizes a reference to a CSV file containing coordinates. This way, it will more versatile in the future, for example, if I manage to obtain a point map of a specific area - eg Czech Republic.
+
+# The original code was processing only the first location, therefore for-loop was added so that the user gets data from all the coordinates in the list. More adjustments were needed in order to be able to obtain a suitable CSV file. I wanted to make sure each row would have coordinates as well, or an index of the location. That would make it easier in the future when analyzing with SQL and joins, or in PowerBi (I will see how I will proceed). Generally I want a tie between the location and the meteorological data.
+
+# Now it is done. Every line will start with its coordinates and elevation.
+
+#For the future: if I get coordinates of the whole country, this will be a lot of data. It will be handy to rewrite the code for date in such a way that I get only dates that I am interested in - eg. 25.11. each year and 24.12. each year. That could be done by adding another for loop in the outer layer which would change start and end date for each run of the for loop. It would mean several downloads from the site. I know open meteo allows me to run only certain amount of downloads - and I do not know if it is number of downloads or data size dependent. I guess I will have to try & see.
+
+# ------------------------------------------------------
+    
+# Instalations:
+
+# pip install openmeteo-requests
+# pip install requests-cache retry-requests numpy pandas
+
+# ------------------------------------------------------
+
+# Ipmorts
+import openmeteo_requests
+import requests_cache
+import pandas as pd
+from retry_requests import retry
+
+# Setup the Open-Meteo API client with cache and retry on error
+cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
+retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
+openmeteo = openmeteo_requests.Client(session = retry_session)
+
+# Adjustment - opening the file with coordinates, making lists of latitudes and longtitudes
+
+file_path_1 = "data/02_souradnice.csv"
+url = "https://archive-api.open-meteo.com/v1/archive"
+start_date = "1940-01-01"
+end_date = "2023-12-31"
+desired_dates = ["11-25", "12-24"]
+katerina_date = desired_dates[0]
+vanoce_date = desired_dates[1]
+
+whole_data = []
+katerina = []
+vanoce = []
+
+####
+
+latitude = []
+longitude = []
+elevation = []
+
+with open(file_path_1, mode="r", encoding="utf-8") as my_file:
+    for index, line in enumerate(my_file):
+        if index == 0:
+            continue
+        line = line.split(",")
+        line = [float(item.strip()) for item in line]
+        latitude.append(line[0])
+        longitude.append(line[1])
+        elevation.append(line[2])
+
+# # this is just temporary & for the purposes of development of this code: I am cutting off the rest of the coordinates & keeping just the first 5 for now. Each time I run the code I use only 5 api calls but I still get to check if my code works. 
+# latitude = latitude[:5]
+# longitude = longitude[:5]
+# # end of the temporaty code
+
+params = {
+	"latitude": latitude,
+	"longitude": longitude,
+	"start_date": start_date,
+	"end_date": end_date,
+	"daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "apparent_temperature_max", "apparent_temperature_min", "apparent_temperature_mean", "sunrise", "sunset", "daylight_duration", "sunshine_duration", "precipitation_sum", "rain_sum", "snowfall_sum", "precipitation_hours", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "shortwave_radiation_sum", "et0_fao_evapotranspiration"]
+}
+responses = openmeteo.weather_api(url, params=params)
+
+# "Add a for-loop for multiple locations or weather models."" - yep, I did ;)
+for index, response in enumerate(responses):
+    for_list = []
+
+    daily = response.Daily()
+    daily_weather_code = daily.Variables(0).ValuesAsNumpy()
+    daily_temperature_2m_max = daily.Variables(1).ValuesAsNumpy()
+    daily_temperature_2m_min = daily.Variables(2).ValuesAsNumpy()
+    daily_temperature_2m_mean = daily.Variables(3).ValuesAsNumpy()
+    daily_apparent_temperature_max = daily.Variables(4).ValuesAsNumpy()
+    daily_apparent_temperature_min = daily.Variables(5).ValuesAsNumpy()
+    daily_apparent_temperature_mean = daily.Variables(6).ValuesAsNumpy()
+    daily_sunrise = daily.Variables(7).ValuesAsNumpy()
+    daily_sunset = daily.Variables(8).ValuesAsNumpy()
+    daily_daylight_duration = daily.Variables(9).ValuesAsNumpy()
+    daily_sunshine_duration = daily.Variables(10).ValuesAsNumpy()
+    daily_precipitation_sum = daily.Variables(11).ValuesAsNumpy()
+    daily_rain_sum = daily.Variables(12).ValuesAsNumpy()
+    daily_snowfall_sum = daily.Variables(13).ValuesAsNumpy()
+    daily_precipitation_hours = daily.Variables(14).ValuesAsNumpy()
+    daily_wind_speed_10m_max = daily.Variables(15).ValuesAsNumpy()
+    daily_wind_gusts_10m_max = daily.Variables(16).ValuesAsNumpy()
+    daily_wind_direction_10m_dominant = daily.Variables(17).ValuesAsNumpy()
+    daily_shortwave_radiation_sum = daily.Variables(18).ValuesAsNumpy()
+    daily_et0_fao_evapotranspiration = daily.Variables(19).ValuesAsNumpy()
+
+    daily_data = {"date": [date.strftime("%Y-%m-%d") for date in pd.date_range(
+            start=pd.to_datetime(daily.Time(), unit="s", utc=True).date(),
+            end=pd.to_datetime(daily.TimeEnd(), unit="s", utc=True).date(),
+            freq=pd.Timedelta(seconds=daily.Interval()),
+            inclusive="left"
+    )]}
+    daily_data["weather_code"] = daily_weather_code
+    daily_data["temperature_2m_max"] = daily_temperature_2m_max
+    daily_data["temperature_2m_min"] = daily_temperature_2m_min
+    daily_data["temperature_2m_mean"] = daily_temperature_2m_mean
+    daily_data["apparent_temperature_max"] = daily_apparent_temperature_max
+    daily_data["apparent_temperature_min"] = daily_apparent_temperature_min
+    daily_data["apparent_temperature_mean"] = daily_apparent_temperature_mean
+    daily_data["sunrise"] = daily_sunrise
+    daily_data["sunset"] = daily_sunset
+    daily_data["daylight_duration"] = daily_daylight_duration
+    daily_data["sunshine_duration"] = daily_sunshine_duration
+    daily_data["precipitation_sum"] = daily_precipitation_sum
+    daily_data["rain_sum"] = daily_rain_sum
+    daily_data["snowfall_sum"] = daily_snowfall_sum
+    daily_data["precipitation_hours"] = daily_precipitation_hours
+    daily_data["wind_speed_10m_max"] = daily_wind_speed_10m_max
+    daily_data["wind_gusts_10m_max"] = daily_wind_gusts_10m_max
+    daily_data["wind_direction_10m_dominant"] = daily_wind_direction_10m_dominant
+    daily_data["shortwave_radiation_sum"] = daily_shortwave_radiation_sum
+    daily_data["et0_fao_evapotranspiration"] = daily_et0_fao_evapotranspiration
+
+    daily_dataframe = pd.DataFrame(data=daily_data)
+    for_list.extend(daily_dataframe.values.tolist())
+
+    lat = latitude[index]
+    lon = longitude[index]
+    ele = elevation[index]
+
+    for inner_list in for_list:
+        inner_list.insert(0, ele)
+        inner_list.insert(0, lon)
+        inner_list.insert(0, lat)
+    
+    # for line in for_list:
+    #     if line[3][5:] in desired_dates: # I am filtering out only desired dates for all the years.
+    #         whole_data.append(line)
+
+    # the upper variation of the code would work for the whole list but I find it handy to filter it right away:
+
+    for line in for_list:
+        if line[3][5:] in katerina_date: # I am filtering out only 25.11. for all the years.
+            katerina.append(line)
+        elif line[3][5:] in vanoce_date: # I am filtering out only 24.12. for all the years.
+            vanoce.append(line)
+    
+
+
+
+# df_whole_data = pd.DataFrame(whole_data, columns = ["latitude", "longtitude", "elevation", "date", "weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "apparent_temperature_max", "apparent_temperature_min", "apparent_temperature_mean", "sunrise", "sunset", "daylight_duration", "sunshine_duration", "precipitation_sum", "rain_sum", "snowfall_sum", "precipitation_hours", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "shortwave_radiation_sum", "et0_fao_evapotranspiration"])
+# df_whole_data.to_csv("data/open_meteo.csv", encoding="utf-8")
+
+df_katerina = pd.DataFrame(katerina, columns = ["latitude", "longtitude", "elevation", "date", "weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "apparent_temperature_max", "apparent_temperature_min", "apparent_temperature_mean", "sunrise", "sunset", "daylight_duration", "sunshine_duration", "precipitation_sum", "rain_sum", "snowfall_sum", "precipitation_hours", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "shortwave_radiation_sum", "et0_fao_evapotranspiration"])
+df_katerina.to_csv("data/katerina.csv", encoding="utf-8")
+
+df_vanoce = pd.DataFrame(vanoce, columns = ["latitude", "longtitude", "elevation", "date", "weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "apparent_temperature_max", "apparent_temperature_min", "apparent_temperature_mean", "sunrise", "sunset", "daylight_duration", "sunshine_duration", "precipitation_sum", "rain_sum", "snowfall_sum", "precipitation_hours", "wind_speed_10m_max", "wind_gusts_10m_max", "wind_direction_10m_dominant", "shortwave_radiation_sum", "et0_fao_evapotranspiration"])
+
+df_vanoce.to_csv("data/vanoce.csv", encoding="utf-8")
+
+
+
+ 
